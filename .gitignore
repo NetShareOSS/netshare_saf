@@ -1,0 +1,42 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+coverage/
+
+# Root package lockfile. Example apps can keep their own pubspec.lock.
+/pubspec.lock
+
+# Generated docs and reports
+doc/api/
+*.log
+
+# Android
+android/.gradle/
+android/local.properties
+android/captures/
+android/**/build/
+android/key.properties
+*.jks
+*.keystore
+
+# iOS/macOS plugin artifacts, if platform support is added later
+ios/.symlinks/
+ios/Pods/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+macos/.symlinks/
+macos/Pods/
+
+# IDE/editor
+.idea/
+.vscode/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db

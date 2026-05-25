@@ -1,0 +1,19 @@
+name: netshare_saf
+description: Android Storage Access Framework bridge for NetShare.
+version: 0.1.0
+publish_to: 'none'
+
+environment:
+  sdk: ^3.10.7
+  flutter: ">=3.35.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.app.netshare.saf
+        pluginClass: NetshareSafPlugin
