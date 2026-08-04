@@ -84,6 +84,16 @@ await for (final chunk in stream) {
 }
 ```
 
+Stream a byte range (for HTTP `206 Partial Content`):
+
+```dart
+final stream = NetshareSaf.readFileStream(
+  document.uri,
+  offset: start,
+  length: end - start + 1,
+);
+```
+
 Write a file in chunks:
 
 ```dart
@@ -124,6 +134,7 @@ Future<Response> fileHandler(String fileName) async {
     headers['content-length'] = document.size.toString();
   }
 
+  // Honor Range / return 206 when the document size is known.
   return Response.ok(
     NetshareSaf.readFileStream(document.uri),
     headers: headers,
@@ -148,10 +159,10 @@ For uploads, parse the multipart request in Dart and forward each incoming chunk
 - `NetshareSaf.hasPersistedPermission(treeUri)`
 - `NetshareSaf.listFiles(treeUri)`
 - `NetshareSaf.readFile(documentUri)`
-- `NetshareSaf.startReadFile(documentUri)`
+- `NetshareSaf.startReadFile(documentUri, {offset})`
 - `NetshareSaf.readFileChunk(sessionId, chunkSize: 262144)`
 - `NetshareSaf.finishReadFile(sessionId)`
-- `NetshareSaf.readFileStream(documentUri)`
+- `NetshareSaf.readFileStream(documentUri, {offset, length})`
 - `NetshareSaf.openFile(documentUri, mimeType)`
 - `NetshareSaf.startWriteFile(treeUri, fileName, mimeType)`
 - `NetshareSaf.writeFileChunk(sessionId, bytes)`
@@ -173,7 +184,6 @@ The API keeps Android document access explicit:
 
 - Only direct children of the selected directory are listed.
 - Recursive traversal is not implemented yet.
-- Random-access reads and HTTP range requests are not implemented yet.
 - Write sessions replace an existing file with the same display name.
 - The plugin currently targets Android only.
 

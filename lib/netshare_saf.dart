@@ -137,11 +137,17 @@ class NetshareSaf {
     return result ?? Uint8List(0);
   }
 
-  /// Opens [documentUri] for chunked reads.
-  static Future<SafReadSession> startReadFile(String documentUri) async {
+  /// Opens [documentUri] for chunked reads, optionally seeking to [offset].
+  static Future<SafReadSession> startReadFile(
+    String documentUri, {
+    int offset = 0,
+  }) async {
+    if (offset < 0) {
+      throw ArgumentError.value(offset, 'offset', 'must be >= 0');
+    }
     final result = await _channel.invokeMapMethod<Object?, Object?>(
       'startReadFile',
-      {'documentUri': documentUri},
+      {'documentUri': documentUri, 'offset': offset},
     );
     if (result == null) {
       throw StateError('Could not start SAF read session.');
@@ -169,12 +175,31 @@ class NetshareSaf {
   }
 
   /// Streams [documentUri] through repeated SAF read chunks.
-  static Stream<Uint8List> readFileStream(String documentUri) async* {
-    final session = await startReadFile(documentUri);
+  ///
+  /// When [offset] is non-zero the native side seeks before the first chunk.
+  /// When [length] is set, at most that many bytes are yielded.
+  static Stream<Uint8List> readFileStream(
+    String documentUri, {
+    int offset = 0,
+    int? length,
+  }) async* {
+    if (length != null && length < 0) {
+      throw ArgumentError.value(length, 'length', 'must be >= 0');
+    }
+    final session = await startReadFile(documentUri, offset: offset);
+    var remaining = length;
     try {
-      while (true) {
-        final chunk = await readFileChunk(session.id);
+      while (remaining == null || remaining > 0) {
+        final chunkSize = remaining == null
+            ? 262144
+            : remaining > 262144
+                ? 262144
+                : remaining;
+        final chunk = await readFileChunk(session.id, chunkSize: chunkSize);
         if (chunk.isEmpty) break;
+        if (remaining != null) {
+          remaining -= chunk.length;
+        }
         yield chunk;
       }
     } finally {

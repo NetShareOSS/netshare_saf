@@ -66,7 +66,12 @@ class NetshareSafPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Activi
                 )
                 "listFiles" -> result.success(listFiles(call.requiredString("treeUri")))
                 "readFile" -> result.success(readFile(call.requiredString("documentUri")))
-                "startReadFile" -> result.success(startReadFile(call.requiredString("documentUri")))
+                "startReadFile" -> result.success(
+                    startReadFile(
+                        call.requiredString("documentUri"),
+                        (call.argument<Number>("offset")?.toLong() ?: 0L).coerceAtLeast(0L),
+                    )
+                )
                 "readFileChunk" -> result.success(
                     readFileChunk(
                         call.requiredString("sessionId"),
@@ -207,12 +212,29 @@ class NetshareSafPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Activi
         return resolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
     }
 
-    private fun startReadFile(documentUri: String): Map<String, String> {
+    private fun startReadFile(documentUri: String, offset: Long): Map<String, String> {
         val stream = resolver.openInputStream(Uri.parse(documentUri))
             ?: error("Could not open SAF input stream.")
+        skipFully(stream, offset)
         val sessionId = UUID.randomUUID().toString()
         readSessions[sessionId] = stream
         return mapOf("sessionId" to sessionId)
+    }
+
+    private fun skipFully(stream: InputStream, offset: Long) {
+        var remaining = offset
+        while (remaining > 0) {
+            val skipped = stream.skip(remaining)
+            if (skipped > 0) {
+                remaining -= skipped
+                continue
+            }
+            // Some providers return 0 from skip(); fall back to reading.
+            if (stream.read() == -1) {
+                break
+            }
+            remaining -= 1
+        }
     }
 
     private fun readFileChunk(sessionId: String, chunkSize: Int): ByteArray {
