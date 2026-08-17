@@ -21,7 +21,8 @@ Existing SAF packages are useful for broad file-management workflows, but NetSha
 ## Features
 
 - Android `ACTION_OPEN_DOCUMENT_TREE` directory picker.
-- Persisted tree URI permissions.
+- Android `ACTION_OPEN_DOCUMENT` file picker (single or multiple) without copying bytes into cache.
+- Persisted tree URI permissions and persistable read-only grants for picked files.
 - Permission validation for previously selected folders.
 - Direct child document listing with name, URI, MIME type, size, and directory flag.
 - Whole-file reads for small utility operations.
@@ -66,6 +67,18 @@ if (directory == null) {
 }
 
 final hasPermission = await NetshareSaf.hasPersistedPermission(directory.uri);
+```
+
+Pick files without copying them into cache (returns `null` if cancelled):
+
+```dart
+final documents = await NetshareSaf.pickFiles();
+if (documents == null) {
+  return;
+}
+
+// When dropping a picked file from the app, release the persisted grant:
+await NetshareSaf.releasePersistableUriPermission(documents.first.uri);
 ```
 
 List direct child files:
@@ -156,6 +169,8 @@ For uploads, parse the multipart request in Dart and forward each incoming chunk
 ### Methods
 
 - `NetshareSaf.pickDirectory()`
+- `NetshareSaf.pickFiles({allowMultiple})`
+- `NetshareSaf.releasePersistableUriPermission(documentUri)`
 - `NetshareSaf.hasPersistedPermission(treeUri)`
 - `NetshareSaf.listFiles(treeUri)`
 - `NetshareSaf.readFile(documentUri)`
@@ -179,6 +194,7 @@ The API keeps Android document access explicit:
 - Check persisted permission before using a stored URI.
 - Use document URIs for reads and opens.
 - Use write sessions for creating or replacing files.
+- Release persistable file URI grants with `releasePersistableUriPermission` when the app no longer needs a picked file (Android limits persisted URI grants).
 
 ## Limitations
 

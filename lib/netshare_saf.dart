@@ -110,6 +110,30 @@ class NetshareSaf {
     return SafDirectory.fromMap(result);
   }
 
+  /// Opens the Android file picker without copying bytes into cache.
+  ///
+  /// Returns `null` if the user cancels. Each document has persistable
+  /// read-only URI permission until [releasePersistableUriPermission].
+  static Future<List<SafDocument>?> pickFiles({
+    bool allowMultiple = true,
+  }) async {
+    final result = await _channel.invokeListMethod<Object?>('pickFiles', {
+      'allowMultiple': allowMultiple,
+    });
+    if (result == null) return null;
+    return result
+        .whereType<Map<Object?, Object?>>()
+        .map(SafDocument.fromMap)
+        .toList();
+  }
+
+  /// Drops persistable read access for a previously picked [documentUri].
+  static Future<void> releasePersistableUriPermission(String documentUri) {
+    return _channel.invokeMethod<void>('releasePersistableUriPermission', {
+      'documentUri': documentUri,
+    });
+  }
+
   /// Returns whether [treeUri] still has a persisted permission grant.
   static Future<bool> hasPersistedPermission(String treeUri) async {
     return await _channel.invokeMethod<bool>('hasPersistedPermission', {

@@ -8,6 +8,7 @@ import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -61,6 +62,14 @@ class NetshareSafPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Activi
         try {
             when (call.method) {
                 "pickDirectory" -> pickDirectory(result)
+                "pickFiles" -> pickFiles(
+                    call.argument<Boolean>("allowMultiple") ?: true,
+                    result,
+                )
+                "releasePersistableUriPermission" -> {
+                    releasePersistableUriPermission(call.requiredString("documentUri"))
+                    result.success(null)
+                }
                 "hasPersistedPermission" -> result.success(
                     hasPersistedPermission(call.requiredString("treeUri"))
                 )
@@ -114,26 +123,49 @@ class NetshareSafPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Activi
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
-        if (requestCode != PICK_DIRECTORY_REQUEST) return false
+        if (requestCode != PICK_DIRECTORY_REQUEST && requestCode != PICK_FILES_REQUEST) {
+            return false
+        }
 
         val result = pendingPickResult ?: return true
         pendingPickResult = null
 
-        if (resultCode != Activity.RESULT_OK || data?.data == null) {
+        if (requestCode == PICK_DIRECTORY_REQUEST) {
+            if (resultCode != Activity.RESULT_OK || data?.data == null) {
+                result.success(null)
+                return true
+            }
+
+            val treeUri = data.data!!
+            val takeFlags = data.flags and
+                (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            context?.contentResolver?.takePersistableUriPermission(treeUri, takeFlags)
+
+            result.success(
+                mapOf(
+                    "uri" to treeUri.toString(),
+                    "name" to getDisplayName(treeUri),
+                )
+            )
+            return true
+        }
+
+        if (resultCode != Activity.RESULT_OK || data == null) {
             result.success(null)
             return true
         }
 
-        val treeUri = data.data!!
-        val takeFlags = data.flags and
-            (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-        context?.contentResolver?.takePersistableUriPermission(treeUri, takeFlags)
+        val uris = collectPickedUris(data)
+        if (uris.isEmpty()) {
+            result.success(null)
+            return true
+        }
 
         result.success(
-            mapOf(
-                "uri" to treeUri.toString(),
-                "name" to getDisplayName(treeUri),
-            )
+            uris.map { uri ->
+                takeReadPersistablePermission(uri)
+                documentFromPickedUri(uri)
+            }
         )
         return true
     }
@@ -145,7 +177,7 @@ class NetshareSafPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Activi
             return
         }
         if (pendingPickResult != null) {
-            result.error("pick_in_progress", "A directory picker is already open.", null)
+            result.error("pick_in_progress", "A picker is already open.", null)
             return
         }
 
@@ -157,6 +189,95 @@ class NetshareSafPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Activi
             addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
         }
         currentActivity.startActivityForResult(intent, PICK_DIRECTORY_REQUEST)
+    }
+
+    private fun pickFiles(allowMultiple: Boolean, result: Result) {
+        val currentActivity = activity
+        if (currentActivity == null) {
+            result.error("no_activity", "No Android activity is attached.", null)
+            return
+        }
+        if (pendingPickResult != null) {
+            result.error("pick_in_progress", "A picker is already open.", null)
+            return
+        }
+
+        pendingPickResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        currentActivity.startActivityForResult(intent, PICK_FILES_REQUEST)
+    }
+
+    private fun collectPickedUris(data: Intent): List<Uri> {
+        val clipData = data.clipData
+        if (clipData != null && clipData.itemCount > 0) {
+            return (0 until clipData.itemCount).mapNotNull { index ->
+                clipData.getItemAt(index).uri
+            }
+        }
+        return listOfNotNull(data.data)
+    }
+
+    private fun takeReadPersistablePermission(uri: Uri) {
+        try {
+            resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+            // Some providers do not support persistable grants.
+        }
+    }
+
+    private fun releasePersistableUriPermission(documentUri: String) {
+        val uri = Uri.parse(documentUri)
+        try {
+            resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+            // Already released or never persisted.
+        }
+    }
+
+    private fun documentFromPickedUri(uri: Uri): Map<String, Any?> {
+        var name: String? = null
+        var size: Long? = null
+        try {
+            resolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    name = cursor.stringValue(OpenableColumns.DISPLAY_NAME)
+                    size = cursor.longValue(OpenableColumns.SIZE)
+                }
+            }
+        } catch (_: Exception) {
+            // Provider may not support OpenableColumns.
+        }
+        val mimeType = resolver.getType(uri) ?: "application/octet-stream"
+        return mapOf(
+            "uri" to uri.toString(),
+            "name" to (name ?: "Untitled"),
+            "mimeType" to mimeType,
+            "size" to (size ?: queryAssetFileDescriptorLength(uri)),
+            "isDirectory" to false,
+        )
+    }
+
+    private fun queryAssetFileDescriptorLength(uri: Uri): Long? {
+        return try {
+            resolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+                val length = descriptor.length
+                if (length >= 0) length else null
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun hasPersistedPermission(treeUri: String): Boolean {
@@ -377,6 +498,7 @@ class NetshareSafPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Activi
 
     companion object {
         private const val PICK_DIRECTORY_REQUEST = 5142
+        private const val PICK_FILES_REQUEST = 5143
         private const val DEFAULT_READ_CHUNK_SIZE = 262144
     }
 }
